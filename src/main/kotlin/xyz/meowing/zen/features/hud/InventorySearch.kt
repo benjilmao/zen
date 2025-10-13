@@ -13,13 +13,16 @@ import xyz.meowing.zen.utils.ItemUtils.lore
 import xyz.meowing.zen.utils.NumberUtils.abbreviateNumber
 import xyz.meowing.zen.utils.Render2D
 import xyz.meowing.zen.utils.Utils.removeFormatting
+import xyz.meowing.zen.utils.ItemUtils.displayName
+import xyz.meowing.zen.utils.NumberUtils.formatNumber
 import net.minecraft.client.gui.Gui
 import net.minecraft.client.gui.inventory.GuiContainer
 import net.minecraft.client.renderer.GlStateManager
 import org.lwjgl.input.Keyboard
 import org.lwjgl.input.Mouse
 import java.awt.Color
-import java.util.Locale
+import java.awt.datatransfer.StringSelection
+import java.awt.Toolkit
 import javax.script.ScriptEngineManager
 
 @Zen.Module
@@ -50,7 +53,7 @@ object InventorySearch : Feature("inventorysearch") {
     )
 
     private val scriptEngine = ScriptEngineManager(null).getEngineByName("JavaScript")
-    private var mathResult: String? = null
+    private var mathResult: Pair<String, Double>? = null
 
     override fun addConfig(configUI: ConfigUI): ConfigUI {
         return configUI
@@ -81,7 +84,20 @@ object InventorySearch : Feature("inventorysearch") {
             ))
     }
 
-    private fun calculateMath(input: String): String? {
+    private fun matchesSearch(itemName: String, itemLore: List<String>, searchQuery: String): Boolean {
+        val cleanQuery = searchQuery.removeFormatting().lowercase().trim()
+        if (cleanQuery.isEmpty()) return true
+
+        val cleanName = itemName.removeFormatting().lowercase()
+        val cleanLore = itemLore.map { it.removeFormatting().lowercase() }
+        val searchTerms = cleanQuery.split(" ").map { it.trim() }.filter { it.isNotEmpty() }
+
+        return searchTerms.all { term ->
+            cleanName.contains(term) || cleanLore.any { it.contains(term) }
+        }
+    }
+
+    private fun calculateMath(input: String): Pair<String, Double>? {
         return try {
             val sanitized = input.replace(sanitizeRegex, "")
             if (sanitized.isBlank() || sanitized.trim() != input.trim()) return null
@@ -100,12 +116,18 @@ object InventorySearch : Feature("inventorysearch") {
                 .replace(xMultiplyRegex, "*")
 
             scriptEngine?.eval(processed)?.toString()?.toDoubleOrNull()?.let { result ->
-                if (abbreviate) result.abbreviateNumber()
-                else "%.1f".format(Locale.US, result).removeSuffix(".0")
+                val displayValue = if (abbreviate) result.abbreviateNumber() else result.formatNumber()
+                Pair(displayValue, result)
             }
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun setClipboardString(text: String) {
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+        val stringSelection = StringSelection(text)
+        clipboard.setContents(stringSelection, null)
     }
 
     override fun initialize() {
@@ -129,11 +151,11 @@ object InventorySearch : Feature("inventorysearch") {
                     GlStateManager.translate(0f, 0f, 300f)
                     draw(mouseX, mouseY)
 
-                    mathResult?.let { result ->
+                    mathResult?.let { (displayValue, _) ->
                         if (value.isNotEmpty()) {
                             val textEndX = (x.toInt() + textPadding.toInt() - scrollOffset.toInt() + fontObj.getStringWidth(value)).toFloat()
                             val textY = (y.toInt() + (height.toInt() - fontObj.FONT_HEIGHT - 0.5) / 2).toFloat()
-                            Render2D.renderString(" = $result", textEndX, textY, 1f, 0x55FF55)
+                            Render2D.renderString(" = $displayValue", textEndX, textY, 1f, 0x55FF55)
                         }
                     }
 
@@ -164,6 +186,17 @@ object InventorySearch : Feature("inventorysearch") {
                 val typedChar = Keyboard.getEventCharacter()
                 val keyCode = Keyboard.getEventKey()
 
+                if (keyCode == Keyboard.KEY_RETURN && searchInput.focused && mathResult != null) {
+                    val (displayValue, rawResult) = mathResult!!
+                    val plainNumber = rawResult.toLong().toString()
+
+                    setClipboardString(plainNumber)
+                    searchInput.value = displayValue
+                    mathResult = null
+                    event.cancel()
+                    return@register
+                }
+
                 if (Keyboard.getEventKeyState() && Keyboard.isKeyDown(Keyboard.KEY_LCONTROL) && keyCode == Keyboard.KEY_F) {
                     searchInput.focused = !searchInput.focused
                     event.cancel()
@@ -178,17 +211,16 @@ object InventorySearch : Feature("inventorysearch") {
         }
 
         register<GuiEvent.Slot.RenderPre> { event ->
-            val text = searchInput.value.lowercase().removeFormatting().takeIf { it.isNotBlank() } ?: return@register
+            val query = searchInput.value.takeIf { it.isNotBlank() } ?: return@register
             val item = event.slot.stack ?: return@register
-            val itemName = item.displayName.removeFormatting().trim().lowercase()
-            val searchableText =
-                if (searchLore) {
-                    (item.lore.map { it.removeFormatting().lowercase() } + itemName).joinToString(" ")
-                } else {
-                    itemName
-                }
+            val itemName = item.displayName().removeFormatting().trim()
+            val itemLore = if (searchLore) {
+                item.lore.map { it.removeFormatting() }
+            } else {
+                emptyList()
+            }
 
-            if (!searchableText.contains(text)) return@register
+            if (!matchesSearch(itemName, itemLore, query)) return@register
 
             val highlightColor = color.rgb
             val x = event.slot.xDisplayPosition
