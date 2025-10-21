@@ -78,9 +78,10 @@ dependencies {
     shadowImpl("gg.essential:universalcraft-1.8.9-forge:430")
     shadowImpl("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2")
 
-    shadowImpl("xyz.meowing:vexel-1.8.9-forge:104") {
+    shadowImpl("xyz.meowing:vexel-1.8.9-forge:107") {
         exclude("org.lwjgl")
     }
+    shadowImpl("com.squareup.okhttp3:okhttp-jvm:5.2.1")
 
     runtimeOnly("me.djtheredstoner:DevAuth-forge-legacy:1.2.1")
 }
