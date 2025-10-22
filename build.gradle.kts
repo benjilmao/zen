@@ -124,6 +124,13 @@ tasks.processResources {
     rename("accesstransformer.cfg", "META-INF/${modId}_at.cfg")
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
+    compilerOptions {
+        freeCompilerArgs.add("-Xlambdas=class")
+        languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_0)
+    }
+}
+
 tasks.named<net.fabricmc.loom.task.RemapJarTask>("remapJar") {
     archiveClassifier.set("")
     archiveBaseName.set("zen-1.8.9-forge-${modVersion}")
