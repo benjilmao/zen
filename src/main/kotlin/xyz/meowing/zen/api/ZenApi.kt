@@ -1,18 +1,47 @@
 package xyz.meowing.zen.api
 
-import okhttp3.*
 import xyz.meowing.zen.Zen
+import xyz.meowing.zen.Zen.Companion.LOGGER
+import xyz.meowing.zen.utils.LoopUtils
 import java.io.File
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import kotlin.math.pow
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 
 @Zen.Module
 object ZenAPI {
     private var ws: WebSocket? = null
+    private var reconnectAttempts = 0
+    private const val MAX_RECONNECT_ATTEMPTS = 5
+    private const val BASE_RECONNECT_DELAY = 10_000L // 10 seconds
+
+    private fun scheduleReconnect() {
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            LOGGER.warn("Max reconnection attempts ($MAX_RECONNECT_ATTEMPTS) reached. Stopping reconnection.")
+            return
+        }
+        val delayMillis = (BASE_RECONNECT_DELAY * 2.0.pow(reconnectAttempts.toDouble())).toLong()
+        reconnectAttempts++
+        LOGGER.info("Reconnecting in ${delayMillis / 1000} seconds...")
+        LoopUtils.setTimeout(delayMillis) {
+            connectToWebsocket()
+        }
+    }
 
     init {
+        connectToWebsocket()
+    }
+
+    fun connectToWebsocket() {
+        LOGGER.info("Connecting to Zen WebSocket...")
         try {
             val uuid = Zen.mc.session.profile.id.toString()
             val hashedUUID = hashUUID(uuid)
@@ -31,6 +60,7 @@ object ZenAPI {
             val url = "ws://zen.mrfast-developer.com:1515/ws?$debugOptions"
 
             val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .build()
 
@@ -40,28 +70,32 @@ object ZenAPI {
 
             ws = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Zen.LOGGER.info("WebSocket opened")
+                    LOGGER.info("WebSocket connected!")
+                    ws = webSocket
+                    reconnectAttempts = 0 // Reset on successful connection
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    Zen.LOGGER.info("Received message: $text")
+                    LOGGER.info("Received message: $text")
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Zen.LOGGER.info("WebSocket error: ${t.message}")
+                    LOGGER.error("WebSocket error: $t")
+                    scheduleReconnect()
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Zen.LOGGER.info("WebSocket closing: $code $reason")
+                    LOGGER.info("WebSocket closing: $code $reason")
                     webSocket.close(code, reason)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Zen.LOGGER.info("WebSocket closed: $code $reason")
+                    LOGGER.info("WebSocket closed: $code $reason")
+                    scheduleReconnect()
                 }
             })
         } catch (e: Exception) {
-            Zen.LOGGER.error("Error initializing ZenAPI", e)
+            LOGGER.error("Error initializing ZenAPI", e)
         }
     }
 
