@@ -1,5 +1,5 @@
 package xyz.meowing.zen.features.mining
-
+// testing
 import xyz.meowing.zen.Zen
 import xyz.meowing.zen.config.ConfigDelegate
 import xyz.meowing.zen.config.ui.ConfigUI
